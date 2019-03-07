@@ -1865,77 +1865,6 @@ var bankStatementReconciliationLine = abstractReconciliationLine.extend({
         });
     },
 
-
-    /** Properties changed */
-
-    // Updates the validation button, the "open balance" line and the  partial reconciliation sign
-    balanceChanged: function() {
-        var self = this;
-
-        // 'reset' the widget to invalid state
-        self.is_valid = false;
-        self.$(".tip_reconciliation_not_balanced").show();
-        self.$(".tbody_open_balance").empty();
-        self.$(".button_ok").text(_t("Reconcile")).removeClass("btn-primary").hide();
-
-        // Find out if the counterpart is lower than, equal or greater than the transaction being reconciled
-        var balance_type = undefined;
-        var digits = 4;
-        if (this.get("currency_id") && session.get_currency(this.get("currency_id"))) {
-            digits = session.get_currency(this.get("currency_id")).digits[1];
-        }
-        if (self.monetaryIsZero(self.get("balance"), digits)) balance_type = "equal";
-        else if (self.get("balance") * self.st_line.amount > 0) balance_type = "greater";
-        else if (self.get("balance") * self.st_line.amount < 0) balance_type = "lower";
-
-        // Adjust to different cases
-        if (balance_type === "equal") {
-            displayValidState(true);
-        } else if (balance_type === "greater") {
-            createOpenBalance(_t("Create Write-off"));
-        } else if (balance_type === "lower") {
-            if (self.st_line.has_no_partner) {
-                createOpenBalance(_t("Choose counterpart"));
-            } else {
-                displayValidState(false, _t("Validate"));
-                createOpenBalance(_t("Open balance"));
-            }
-        }
-
-        // Show or hide partial reconciliation
-        if (self.get("mv_lines_selected").length > 0) {
-            var last_line = _.last(self.get("mv_lines_selected"));
-            var propose_partial = self.getCreatedLines().length === 0
-                && balance_type === "greater"
-                && Math.abs(self.get("balance")) < Math.abs(last_line.debit - last_line.credit)
-                && self.get("balance") * (last_line.debit - last_line.credit) < 0
-                && ! last_line.partial_reconcile
-                && ! last_line.already_paid;
-            last_line.propose_partial_reconcile = propose_partial;
-            self.updateAccountingViewMatchedLines();
-        }
-
-        function displayValidState(higlight_ok_button, ok_button_text) {
-            self.is_valid = true;
-            self.$(".tip_reconciliation_not_balanced").hide();
-            self.$(".button_ok").show();
-            if (higlight_ok_button) self.$(".button_ok").addClass("btn-primary");
-            if (ok_button_text !== undefined) self.$(".button_ok").text(ok_button_text)
-        }
-
-        function createOpenBalance(name) {
-            var balance = self.get("balance");
-            var amount = self.formatCurrencies(Math.abs(balance), self.get("currency_id"));
-            var $line = $(QWeb.render("reconciliation_line_open_balance", {
-                debit: balance > 0 ? amount : "",
-                credit: balance < 0 ? amount : "",
-                account_code: self.map_account_id_code[self.st_line.open_balance_account_id],
-                label: name || _t("Open balance")
-            }));
-            self.$(".tbody_open_balance").empty().append($line);
-        }
-    },
-
     mvLinesSelectedChanged: function(elt, val) {
         var self = this;
 
@@ -2457,11 +2386,43 @@ var manualReconciliationLine = abstractReconciliationLine.extend({
             this.set("mode", "match");
     },
 
-    buttonReconcileClickHandler: function() {
-        if (this.persist_action === "reconcile")
-            this.processReconciliation();
-        else if (this.persist_action === "mark_as_reconciled")
+    buttonReconcileClickHandler: function () {
+        var aml = {};
+        var template_id = null;
+        if (this.persist_action === "reconcile") {
+            var deferred_rec = this.processReconciliation();
+            $.when(deferred_rec).then(() => {
+                console.log(this);
+                template_id = Object.keys(this.distribution_template_id_field.display_value)[0];
+                console.log(template_id);
+                var mv_line_ids = _.collect(this.get("mv_lines_selected"), function (o) {
+                    return o.id
+                });
+                console.log(mv_line_ids);
+                if (template_id !== undefined && template_id !== null) {
+                    this.model_aml.query(['id']).filter([['distribution_template_id', '=', parseInt(template_id)]]).order_by('-write_date').first().then(function (data) {
+                        console.log("data: " + data);
+                        if (data !== null) {
+                            console.log("data['id']: " + data['id']);
+                            aml.id = data['id'];
+                            console.log("aml.id: " + aml.id);
+                        }
+                    }).done(() => {
+                        if (aml.id !== undefined && aml.id != 0) {
+                            return this.getParent().action_manager.do_action({
+                                type: 'ir.actions.act_window',
+                                res_model: 'account.move.line',
+                                views: [[false, 'form']],
+                                res_id: aml.id,
+                                target: "current"
+                            });
+                        }
+                    })
+                }
+            })
+        } else if (this.persist_action === "mark_as_reconciled")
             this.markAsReconciled();
+
     },
 
     // Make sure there's at least one (empty) line in the accounting view so the T appears
