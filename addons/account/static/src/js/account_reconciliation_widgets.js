@@ -2480,10 +2480,12 @@ var manualReconciliationLine = abstractReconciliationLine.extend({
                     }).done(() => {
                         if (aml.id !== undefined && aml.id != 0) {
                             return this.getParent().action_manager.do_action({
+                                domain: [['move_id', '=', aml.id]],
+                                res_model: 'account.analytic.line',
                                 type: 'ir.actions.act_window',
-                                res_model: 'account.move.line',
-                                views: [[false, 'form']],
-                                res_id: aml.id,
+                                views: [[false, 'list'], [false, 'form']],
+                                view_type: "list",
+                                view_mode: "list",
                                 target: "current"
                             });
                         }
