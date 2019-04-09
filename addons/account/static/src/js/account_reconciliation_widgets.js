@@ -1000,7 +1000,7 @@ var abstractReconciliationLine = Widget.extend({
             var tax_id = self.tax_id_field.get("value");
             if (amount && tax_id) {
                 deferred_tax = self.model_tax
-                    .call("json_friendly_compute_all", [[tax_id], amount, self.get("currency_id")])
+                    .call("json_friendly_compute_all", [[tax_id], amount, self.get("currency_id")], {context: {round: true}}) // just as the python will do
                     .then(function(data){
                         line_created_being_edited.length = 1; // remove tax lines
                         line_created_being_edited[0].amount_before_tax = amount;
@@ -2457,11 +2457,44 @@ var manualReconciliationLine = abstractReconciliationLine.extend({
             this.set("mode", "match");
     },
 
-    buttonReconcileClickHandler: function() {
-        if (this.persist_action === "reconcile")
-            this.processReconciliation();
-        else if (this.persist_action === "mark_as_reconciled")
+    buttonReconcileClickHandler: function () {
+        var aml = {};
+        var template_id = null;
+        if (this.persist_action === "reconcile") {
+            var deferred_rec = this.processReconciliation();
+            $.when(deferred_rec).then(() => {
+                // console.log(this);
+                template_id = Object.keys(this.distribution_template_id_field.display_value)[0];
+                // console.log(template_id);
+                var mv_line_ids = _.collect(this.get("mv_lines_selected"), function (o) {
+                    return o.id
+                });
+                // console.log(mv_line_ids);
+                if (template_id !== undefined && template_id !== null) {
+                    this.model_aml.query(['id']).filter([['distribution_template_id', '=', parseInt(template_id)]]).order_by('-write_date').first().then(function (data) {
+                        // console.log("data: " + data);
+                        if (data !== null) {
+                            // console.log("data['id']: " + data['id']);
+                            aml.id = data['id'];
+                        }
+                    }).done(() => {
+                        if (aml.id !== undefined && aml.id != 0) {
+                            return this.getParent().action_manager.do_action({
+                                domain: [['move_id', '=', aml.id]],
+                                res_model: 'account.analytic.line',
+                                type: 'ir.actions.act_window',
+                                views: [[false, 'list'], [false, 'form']],
+                                view_type: "list",
+                                view_mode: "list",
+                                target: "current"
+                            });
+                        }
+                    })
+                }
+            })
+        } else if (this.persist_action === "mark_as_reconciled")
             this.markAsReconciled();
+
     },
 
     // Make sure there's at least one (empty) line in the accounting view so the T appears
